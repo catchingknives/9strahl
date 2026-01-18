@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>9strahl – Berlin U-Bahn Compass</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    #map { width: 100vw; height: 100vh; cursor: crosshair; }
+    #info {
+      position: fixed;
+      bottom: 20px;
+      left: 20px;
+      z-index: 1000;
+      background: rgba(255,255,255,0.95);
+      padding: 16px;
+      border-radius: 12px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+      font-size: 12px;
+      max-width: 280px;
+    }
+    #info h3 { margin-bottom: 8px; font-size: 15px; }
+    .line-item { display: flex; align-items: center; margin: 4px 0; }
+    .color-dot { width: 14px; height: 14px; border-radius: 50%; margin-right: 8px; flex-shrink: 0; border: 1px solid rgba(0,0,0,0.1); }
+    .line-name { font-weight: bold; width: 24px; font-size: 11px; }
+    .station-name { color: #666; margin-left: 6px; font-size: 11px; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .distance { margin-left: auto; font-weight: 500; font-size: 11px; color: #444; min-width: 45px; text-align: right; }
+    #coords { position: fixed; top: 20px; right: 20px; z-index: 1000; background: rgba(255,255,255,0.9); padding: 8px 12px; border-radius: 8px; font-family: monospace; font-size: 12px; }
+    .leaflet-container { background: #f0f0f0; }
+    .station-label { background: rgba(255,255,255,0.85); border: none; box-shadow: 0 1px 3px rgba(0,0,0,0.2); padding: 2px 6px; font-size: 11px; font-weight: 500; }
+    .controls { margin-top: 10px; padding-top: 10px; border-top: 1px solid #eee; }
+    .controls label { display: flex; align-items: center; cursor: pointer; font-size: 11px; margin-bottom: 4px; }
+    .controls input { margin-right: 6px; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div id="coords">Click anywhere on the map</div>
+  <div id="info">
+    <h3>Berlin U-Bahn Compass</h3>
+    <p style="color:#666;font-size:11px;margin-bottom:10px;">Click anywhere. Spikes point toward nearest station of each line.</p>
+    <div id="result"></div>
+    <div class="controls">
+      <label><input type="checkbox" id="show-lines"> Show U-Bahn lines</label>
+      <label><input type="checkbox" id="show-stations"> Show station names</label>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+// BVG Official Colors
+const LINE_COLORS = {
+  U1: '#7DAD4C',
+  U2: '#DA421E',
+  U3: '#007A5B',
+  U4: '#F0D722',
+  U5: '#7E5330',
+  U6: '#8C6DAB',
+  U7: '#528DBA',
+  U8: '#224F86',
+  U9: '#F3791D'
+};
+
+// Line order for radar (clockwise from top)
+const LINE_ORDER = ['U1', 'U2', 'U3', 'U4', 'U5', 'U6', 'U7', 'U8', 'U9'];
+
+// Complete Berlin U-Bahn station database
+const STATIONS = [
+  ['Uhlandstraße', 52.5028118, 13.3266968, ['U1']],
+  ['Kurfürstendamm', 52.5038223, 13.3314365, ['U1', 'U9']],
+  ['Wittenbergplatz', 52.5017976, 13.3430005, ['U1', 'U2']],
+  ['Nollendorfplatz', 52.4995972, 13.3537297, ['U1', 'U2', 'U4']],
+  ['Kurfürstenstraße', 52.4999599, 13.3619411, ['U1']],
+  ['Gleisdreieck', 52.4995261, 13.3740318, ['U1', 'U2']],
+  ['Möckernbrücke', 52.4986927, 13.3831230, ['U1', 'U7']],
+  ['Hallesches Tor', 52.4977596, 13.3906496, ['U1', 'U6']],
+  ['Prinzenstraße', 52.4983972, 13.4059100, ['U1']],
+  ['Kottbusser Tor', 52.4989853, 13.4183107, ['U1', 'U8']],
+  ['Görlitzer Bahnhof', 52.4992628, 13.4280355, ['U1']],
+  ['Schlesisches Tor', 52.5008341, 13.4414625, ['U1']],
+  ['Warschauer Straße', 52.5050140, 13.4490065, ['U1']],
+  ['Ruhleben', 52.5256744, 13.2414191, ['U2']],
+  ['Olympia-Stadion', 52.5168, 13.2416, ['U2']],
+  ['Neu-Westend', 52.5162154, 13.2592357, ['U2']],
+  ['Theodor-Heuss-Platz', 52.5099869, 13.2722217, ['U2']],
+  ['Kaiserdamm', 52.5100921, 13.2831263, ['U2']],
+  ['Sophie-Charlotte-Platz', 52.5109137, 13.2963306, ['U2']],
+  ['Bismarckstraße', 52.5115148, 13.3052393, ['U2', 'U7']],
+  ['Deutsche Oper', 52.5118370, 13.3105328, ['U2']],
+  ['Ernst-Reuter-Platz', 52.5118853, 13.3221613, ['U2']],
+  ['Zoologischer Garten', 52.5058669, 13.3330236, ['U2', 'U9']],
+  ['Bülowstraße', 52.4975858, 13.3632209, ['U2']],
+  ['Mendelssohn-Bartholdy-Park', 52.5037240, 13.3748605, ['U2']],
+  ['Potsdamer Platz', 52.5091586, 13.3782147, ['U2']],
+  ['Anton-Wilhelm-Amo-Straße', 52.5117915, 13.3850915, ['U2']],
+  ['Stadtmitte', 52.5120808, 13.3896554, ['U2', 'U6']],
+  ['Hausvogteiplatz', 52.5133502, 13.3955910, ['U2']],
+  ['Spittelmarkt', 52.5112959, 13.4041155, ['U2']],
+  ['Märkisches Museum', 52.5122, 13.4085, ['U2']],
+  ['Klosterstraße', 52.5172347, 13.4124323, ['U2']],
+  ['Alexanderplatz', 52.5219, 13.4132, ['U2', 'U5', 'U8']],
+  ['Rosa-Luxemburg-Platz', 52.5288, 13.4108, ['U2']],
+  ['Senefelderplatz', 52.5323899, 13.4126861, ['U2']],
+  ['Eberswalder Straße', 52.5419, 13.4044, ['U2']],
+  ['Schönhauser Allee', 52.5489, 13.4142, ['U2']],
+  ['Vinetastraße', 52.5593248, 13.4132780, ['U2']],
+  ['Pankow', 52.5672, 13.4122, ['U2']],
+  ['Krumme Lanke', 52.4434481, 13.2413921, ['U3']],
+  ['Onkel Toms Hütte', 52.4498912, 13.2530752, ['U3']],
+  ['Oskar-Helene-Heim', 52.4503608, 13.2690711, ['U3']],
+  ['Freie Universität (Thielplatz)', 52.4510388, 13.2817440, ['U3']],
+  ['Dahlem-Dorf', 52.4574096, 13.2897049, ['U3']],
+  ['Podbielskiallee', 52.4635, 13.2939, ['U3']],
+  ['Breitenbachplatz', 52.4728, 13.3073, ['U3']],
+  ['Rüdesheimer Platz', 52.4829, 13.3193, ['U3']],
+  ['Heidelberger Platz', 52.4889, 13.3115, ['U3', 'U7']],
+  ['Fehrbelliner Platz', 52.4932, 13.3199, ['U3', 'U7']],
+  ['Hohenzollernplatz', 52.4958, 13.3246, ['U3']],
+  ['Spichernstraße', 52.4962, 13.3301, ['U3', 'U9']],
+  ['Augsburger Straße', 52.5002, 13.3346, ['U3']],
+  ['Viktoria-Luise-Platz', 52.4963, 13.3432, ['U4']],
+  ['Bayerischer Platz', 52.4885755, 13.3405436, ['U4', 'U7']],
+  ['Rathaus Schöneberg', 52.4837, 13.3420, ['U4']],
+  ['Innsbrucker Platz', 52.4789870, 13.3436736, ['U4']],
+  ['Hauptbahnhof', 52.5252819, 13.3701242, ['U5']],
+  ['Bundestag', 52.5199, 13.3736, ['U5']],
+  ['Brandenburger Tor', 52.5166047, 13.3809897, ['U5']],
+  ['Unter den Linden', 52.5171, 13.3888, ['U5']],
+  ['Museumsinsel', 52.5201, 13.3971, ['U5']],
+  ['Rotes Rathaus', 52.5179, 13.4073, ['U5']],
+  ['Schillingstraße', 52.5207900, 13.4211125, ['U5']],
+  ['Strausberger Platz', 52.5180981, 13.4315264, ['U5']],
+  ['Weberwiese', 52.5167465, 13.4447135, ['U5']],
+  ['Frankfurter Tor', 52.5158180, 13.4539745, ['U5']],
+  ['Samariterstraße', 52.5147399, 13.4644405, ['U5']],
+  ['Frankfurter Allee', 52.5136227, 13.4754364, ['U5']],
+  ['Magdalenenstraße', 52.5124541, 13.4870792, ['U5']],
+  ['Lichtenberg', 52.5111151, 13.4986022, ['U5']],
+  ['Friedrichsfelde', 52.5061644, 13.5128387, ['U5']],
+  ['Tierpark', 52.4973, 13.5267, ['U5']],
+  ['Biesdorf-Süd', 52.4996047, 13.5465321, ['U5']],
+  ['Elsterwerdaer Platz', 52.5052929, 13.5608780, ['U5']],
+  ['Wuhletal', 52.5105, 13.5758, ['U5']],
+  ['Kaulsdorf-Nord', 52.5211535, 13.5889176, ['U5']],
+  ['Kienberg (Gärten der Welt)', 52.5286152, 13.5906369, ['U5']],
+  ['Cottbusser Platz', 52.5338331, 13.5964015, ['U5']],
+  ['Hönow', 52.5384335, 13.6331230, ['U5']],
+  ['Alt-Tegel', 52.5898, 13.2839, ['U6']],
+  ['Borsigwerke', 52.5818407, 13.2905918, ['U6']],
+  ['Holzhauser Straße', 52.5756920, 13.2961132, ['U6']],
+  ['Otisstraße', 52.5710338, 13.3029254, ['U6']],
+  ['Scharnweberstraße', 52.5668172, 13.3126219, ['U6']],
+  ['Kurt-Schumacher-Platz', 52.5632274, 13.3271290, ['U6']],
+  ['Afrikanische Straße', 52.5602382, 13.3346178, ['U6']],
+  ['Rehberge', 52.5566893, 13.3409843, ['U6']],
+  ['Seestraße', 52.5498029, 13.3531176, ['U6']],
+  ['Leopoldplatz', 52.5463833, 13.3591672, ['U6', 'U9']],
+  ['Wedding', 52.5430625, 13.3650375, ['U6']],
+  ['Reinickendorfer Straße', 52.5397, 13.3702, ['U6']],
+  ['Schwartzkopffstraße', 52.5351574, 13.3773180, ['U6']],
+  ['Naturkundemuseum', 52.5312724, 13.3821605, ['U6']],
+  ['Oranienburger Tor', 52.5255998, 13.3873583, ['U6']],
+  ['Friedrichstraße', 52.5202635, 13.3882862, ['U6']],
+  ['Französische Straße', 52.5168, 13.3882, ['U6']],
+  ['Kochstraße', 52.5069, 13.3905, ['U6']],
+  ['Mehringdamm', 52.4941308, 13.3886168, ['U6', 'U7']],
+  ['Platz der Luftbrücke', 52.4860843, 13.3859508, ['U6']],
+  ['Paradestraße', 52.4780189, 13.3862561, ['U6']],
+  ['Tempelhof', 52.4703, 13.3860, ['U6']],
+  ['Alt-Tempelhof', 52.4655217, 13.3856299, ['U6']],
+  ['Kaiserin-Augusta-Straße', 52.4599764, 13.3846346, ['U6']],
+  ['Ullsteinstraße', 52.4537449, 13.3844659, ['U6']],
+  ['Westphalweg', 52.4462674, 13.3856905, ['U6']],
+  ['Alt-Mariendorf', 52.4396754, 13.3875138, ['U6']],
+  ['Rathaus Spandau', 52.5357, 13.1996, ['U7']],
+  ['Altstadt Spandau', 52.5361, 13.2089, ['U7']],
+  ['Zitadelle', 52.5387, 13.2239, ['U7']],
+  ['Haselhorst', 52.5407, 13.2375, ['U7']],
+  ['Paulsternstraße', 52.5427, 13.2494, ['U7']],
+  ['Rohrdamm', 52.5429, 13.2618, ['U7']],
+  ['Siemensdamm', 52.5401, 13.2712, ['U7']],
+  ['Halemweg', 52.5358, 13.2824, ['U7']],
+  ['Jakob-Kaiser-Platz', 52.5318, 13.2925, ['U7']],
+  ['Jungfernheide', 52.5297, 13.2995, ['U7']],
+  ['Mierendorffplatz', 52.5253, 13.3068, ['U7']],
+  ['Richard-Wagner-Platz', 52.5173870, 13.3065880, ['U7']],
+  ['Wilmersdorfer Straße', 52.5073, 13.3063, ['U7']],
+  ['Adenauerplatz', 52.5000028, 13.3073226, ['U7']],
+  ['Konstanzer Straße', 52.4945315, 13.3090745, ['U7']],
+  ['Blissestraße', 52.4893, 13.3213, ['U7']],
+  ['Berliner Straße', 52.4873298, 13.3310103, ['U7', 'U9']],
+  ['Eisenacher Straße', 52.4895529, 13.3501694, ['U7']],
+  ['Kleistpark', 52.4898, 13.3606, ['U7']],
+  ['Yorckstraße', 52.4929715, 13.3706891, ['U7']],
+  ['Gneisenaustraße', 52.4912895, 13.3958247, ['U7']],
+  ['Südstern', 52.4892983, 13.4076671, ['U7']],
+  ['Hermannplatz', 52.4866, 13.4246, ['U7', 'U8']],
+  ['Rathaus Neukölln', 52.4810, 13.4341, ['U7']],
+  ['Karl-Marx-Straße', 52.4762696, 13.4393375, ['U7']],
+  ['Neukölln', 52.4685956, 13.4418203, ['U7']],
+  ['Grenzallee', 52.4628825, 13.4447716, ['U7']],
+  ['Blaschkoallee', 52.4562, 13.4476, ['U7']],
+  ['Parchimer Allee', 52.4496, 13.4501, ['U7']],
+  ['Britz-Süd', 52.4377918, 13.4481868, ['U7']],
+  ['Johannisthaler Chaussee', 52.4293213, 13.4533376, ['U7']],
+  ['Lipschitzallee', 52.4246425, 13.4626984, ['U7']],
+  ['Wutzkyallee', 52.4212, 13.4724, ['U7']],
+  ['Zwickauer Damm', 52.4233803, 13.4839403, ['U7']],
+  ['Rudow', 52.4161700, 13.4953978, ['U7']],
+  ['Wittenau', 52.5967, 13.3255, ['U8']],
+  ['Rathaus Reinickendorf', 52.5884057, 13.3257334, ['U8']],
+  ['Karl-Bonhoeffer-Nervenklinik', 52.5799, 13.3311, ['U8']],
+  ['Lindauer Allee', 52.5754161, 13.3384251, ['U8']],
+  ['Paracelsus-Bad', 52.5742433, 13.3485110, ['U8']],
+  ['Residenzstraße', 52.5711895, 13.3604739, ['U8']],
+  ['Franz-Neumann-Platz', 52.5645392, 13.3639236, ['U8']],
+  ['Osloer Straße', 52.5569, 13.3729, ['U8', 'U9']],
+  ['Pankstraße', 52.5522617, 13.3814583, ['U8']],
+  ['Gesundbrunnen', 52.5488223, 13.3883057, ['U8']],
+  ['Voltastraße', 52.5422898, 13.3928760, ['U8']],
+  ['Bernauer Straße', 52.5378, 13.3967, ['U8']],
+  ['Rosenthaler Platz', 52.5298999, 13.4011206, ['U8']],
+  ['Weinmeisterstraße', 52.5254666, 13.4050194, ['U8']],
+  ['Jannowitzbrücke', 52.5153554, 13.4181732, ['U8']],
+  ['Heinrich-Heine-Straße', 52.5104, 13.4167, ['U8']],
+  ['Moritzplatz', 52.5036623, 13.4107479, ['U8']],
+  ['Schönleinstraße', 52.4930552, 13.4220572, ['U8']],
+  ['Boddinstraße', 52.4801685, 13.4252810, ['U8']],
+  ['Leinestraße', 52.4729787, 13.4283545, ['U8']],
+  ['Hermannstraße', 52.4672622, 13.4314659, ['U8']],
+  ['Nauener Platz', 52.5514056, 13.3671696, ['U9']],
+  ['Amrumer Straße', 52.5423332, 13.3501546, ['U9']],
+  ['Westhafen', 52.5367350, 13.3425741, ['U9']],
+  ['Birkenstraße', 52.5325, 13.3354, ['U9']],
+  ['Turmstraße', 52.5259, 13.3393, ['U9']],
+  ['Hansaplatz', 52.5180080, 13.3420365, ['U9']],
+  ['Güntzelstraße', 52.4920843, 13.3310064, ['U9']],
+  ['Bundesplatz', 52.4824, 13.3292, ['U9']],
+  ['Friedrich-Wilhelm-Platz', 52.4721217, 13.3287301, ['U9']],
+  ['Walther-Schreiber-Platz', 52.4653254, 13.3282601, ['U9']],
+  ['Schloßstraße', 52.4614810, 13.3250946, ['U9']],
+  ['Rathaus Steglitz', 52.4567983, 13.3209344, ['U9']],
+];
+
+// U-Bahn line routes for drawing
+const LINE_ROUTES = {
+  U1: ['Uhlandstraße', 'Kurfürstendamm', 'Wittenbergplatz', 'Nollendorfplatz', 'Kurfürstenstraße', 'Gleisdreieck', 'Möckernbrücke', 'Hallesches Tor', 'Prinzenstraße', 'Kottbusser Tor', 'Görlitzer Bahnhof', 'Schlesisches Tor', 'Warschauer Straße'],
+  U2: ['Ruhleben', 'Olympia-Stadion', 'Neu-Westend', 'Theodor-Heuss-Platz', 'Kaiserdamm', 'Sophie-Charlotte-Platz', 'Bismarckstraße', 'Deutsche Oper', 'Ernst-Reuter-Platz', 'Zoologischer Garten', 'Wittenbergplatz', 'Nollendorfplatz', 'Bülowstraße', 'Gleisdreieck', 'Mendelssohn-Bartholdy-Park', 'Potsdamer Platz', 'Anton-Wilhelm-Amo-Straße', 'Stadtmitte', 'Hausvogteiplatz', 'Spittelmarkt', 'Märkisches Museum', 'Klosterstraße', 'Alexanderplatz', 'Rosa-Luxemburg-Platz', 'Senefelderplatz', 'Eberswalder Straße', 'Schönhauser Allee', 'Vinetastraße', 'Pankow'],
+  U3: ['Krumme Lanke', 'Onkel Toms Hütte', 'Oskar-Helene-Heim', 'Freie Universität (Thielplatz)', 'Dahlem-Dorf', 'Podbielskiallee', 'Breitenbachplatz', 'Rüdesheimer Platz', 'Heidelberger Platz', 'Fehrbelliner Platz', 'Hohenzollernplatz', 'Spichernstraße', 'Augsburger Straße', 'Wittenbergplatz', 'Nollendorfplatz', 'Kurfürstenstraße', 'Gleisdreieck', 'Möckernbrücke', 'Hallesches Tor', 'Prinzenstraße', 'Kottbusser Tor', 'Görlitzer Bahnhof', 'Schlesisches Tor', 'Warschauer Straße'],
+  U4: ['Nollendorfplatz', 'Viktoria-Luise-Platz', 'Bayerischer Platz', 'Rathaus Schöneberg', 'Innsbrucker Platz'],
+  U5: ['Hauptbahnhof', 'Bundestag', 'Brandenburger Tor', 'Unter den Linden', 'Museumsinsel', 'Rotes Rathaus', 'Alexanderplatz', 'Schillingstraße', 'Strausberger Platz', 'Weberwiese', 'Frankfurter Tor', 'Samariterstraße', 'Frankfurter Allee', 'Magdalenenstraße', 'Lichtenberg', 'Friedrichsfelde', 'Tierpark', 'Biesdorf-Süd', 'Elsterwerdaer Platz', 'Wuhletal', 'Kaulsdorf-Nord', 'Kienberg (Gärten der Welt)', 'Cottbusser Platz', 'Hönow'],
+  U6: ['Alt-Tegel', 'Borsigwerke', 'Holzhauser Straße', 'Otisstraße', 'Scharnweberstraße', 'Kurt-Schumacher-Platz', 'Afrikanische Straße', 'Rehberge', 'Seestraße', 'Leopoldplatz', 'Wedding', 'Reinickendorfer Straße', 'Schwartzkopffstraße', 'Naturkundemuseum', 'Oranienburger Tor', 'Friedrichstraße', 'Französische Straße', 'Stadtmitte', 'Kochstraße', 'Hallesches Tor', 'Mehringdamm', 'Platz der Luftbrücke', 'Paradestraße', 'Tempelhof', 'Alt-Tempelhof', 'Kaiserin-Augusta-Straße', 'Ullsteinstraße', 'Westphalweg', 'Alt-Mariendorf'],
+  U7: ['Rathaus Spandau', 'Altstadt Spandau', 'Zitadelle', 'Haselhorst', 'Paulsternstraße', 'Rohrdamm', 'Siemensdamm', 'Halemweg', 'Jakob-Kaiser-Platz', 'Jungfernheide', 'Mierendorffplatz', 'Richard-Wagner-Platz', 'Bismarckstraße', 'Wilmersdorfer Straße', 'Adenauerplatz', 'Konstanzer Straße', 'Fehrbelliner Platz', 'Blissestraße', 'Berliner Straße', 'Bayerischer Platz', 'Eisenacher Straße', 'Kleistpark', 'Yorckstraße', 'Möckernbrücke', 'Mehringdamm', 'Gneisenaustraße', 'Südstern', 'Hermannplatz', 'Rathaus Neukölln', 'Karl-Marx-Straße', 'Neukölln', 'Grenzallee', 'Blaschkoallee', 'Parchimer Allee', 'Britz-Süd', 'Johannisthaler Chaussee', 'Lipschitzallee', 'Wutzkyallee', 'Zwickauer Damm', 'Rudow'],
+  U8: ['Wittenau', 'Rathaus Reinickendorf', 'Karl-Bonhoeffer-Nervenklinik', 'Lindauer Allee', 'Paracelsus-Bad', 'Residenzstraße', 'Franz-Neumann-Platz', 'Osloer Straße', 'Pankstraße', 'Gesundbrunnen', 'Voltastraße', 'Bernauer Straße', 'Rosenthaler Platz', 'Weinmeisterstraße', 'Alexanderplatz', 'Jannowitzbrücke', 'Heinrich-Heine-Straße', 'Moritzplatz', 'Kottbusser Tor', 'Schönleinstraße', 'Hermannplatz', 'Boddinstraße', 'Leinestraße', 'Hermannstraße'],
+  U9: ['Osloer Straße', 'Nauener Platz', 'Leopoldplatz', 'Amrumer Straße', 'Westhafen', 'Birkenstraße', 'Turmstraße', 'Hansaplatz', 'Zoologischer Garten', 'Kurfürstendamm', 'Spichernstraße', 'Güntzelstraße', 'Berliner Straße', 'Bundesplatz', 'Friedrich-Wilhelm-Platz', 'Walther-Schreiber-Platz', 'Schloßstraße', 'Rathaus Steglitz']
+};
+
+// Radar chart constants
+const RADAR_RADIUS = 40;
+const MIN_SPIKE_LENGTH = 8;  // Minimum visible spike
+const MAX_DISTANCE = 15000;  // 15km - beyond this, spike is at minimum
+
+// Build station lookup by name
+const stationByName = {};
+STATIONS.forEach(([name, lat, lng, lines]) => {
+  stationByName[name] = [lat, lng];
+});
+
+// Berlin bounds
+const berlinBounds = L.latLngBounds(
+  L.latLng(52.34, 13.08),
+  L.latLng(52.68, 13.76)
+);
+
+// Initialize map
+const map = L.map('map', {
+  minZoom: 11,
+  maxZoom: 18,
+  maxBounds: berlinBounds,
+  maxBoundsViscosity: 1.0
+}).setView([52.52, 13.405], 12);
+
+L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+  maxZoom: 18
+}).addTo(map);
+
+// U-Bahn lines layer group
+const linesLayer = L.layerGroup();
+
+function drawLines() {
+  Object.entries(LINE_ROUTES).forEach(([line, stations]) => {
+    const coords = stations
+      .map(name => stationByName[name])
+      .filter(coord => coord !== undefined);
+
+    if (coords.length > 1) {
+      L.polyline(coords, {
+        color: LINE_COLORS[line],
+        weight: 4,
+        opacity: 0.7
+      }).addTo(linesLayer);
+    }
+  });
+}
+
+drawLines();
+
+// Station names layer
+const stationsLayer = L.layerGroup();
+
+function createStationMarkers() {
+  STATIONS.forEach(([name, lat, lng, lines]) => {
+    const primaryLine = lines[0];
+    const marker = L.circleMarker([lat, lng], {
+      radius: 4,
+      fillColor: LINE_COLORS[primaryLine],
+      color: '#fff',
+      weight: 1,
+      fillOpacity: 1
+    });
+
+    marker.bindTooltip(name, {
+      permanent: true,
+      direction: 'right',
+      offset: [6, 0],
+      className: 'station-label'
+    });
+
+    marker.addTo(stationsLayer);
+  });
+}
+
+createStationMarkers();
+
+// Toggle controls
+document.getElementById('show-lines').addEventListener('change', function(e) {
+  if (e.target.checked) {
+    linesLayer.addTo(map);
+  } else {
+    map.removeLayer(linesLayer);
+  }
+});
+
+document.getElementById('show-stations').addEventListener('change', function(e) {
+  if (e.target.checked) {
+    stationsLayer.addTo(map);
+  } else {
+    map.removeLayer(stationsLayer);
+  }
+});
+
+// Current radar marker
+let radarMarker = null;
+
+// Click handler
+map.on('click', function(e) {
+  const lat = e.latlng.lat;
+  const lng = e.latlng.lng;
+
+  document.getElementById('coords').textContent = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+
+  const result = calculateRadar(lat, lng);
+  showRadar(e.latlng, result);
+  updateInfo(result);
+});
+
+function calculateRadar(lat, lng) {
+  const clickLatLng = L.latLng(lat, lng);
+
+  // Calculate distance to closest station for each line
+  const lineDistances = {};
+
+  STATIONS.forEach(([name, sLat, sLng, lines]) => {
+    const stationLatLng = L.latLng(sLat, sLng);
+    const dist = clickLatLng.distanceTo(stationLatLng);
+
+    lines.forEach(line => {
+      if (!lineDistances[line] || dist < lineDistances[line].dist) {
+        lineDistances[line] = { name, lat: sLat, lng: sLng, line, dist };
+      }
+    });
+  });
+
+  // Convert to array in line order
+  const result = LINE_ORDER.map(line => {
+    const data = lineDistances[line];
+
+    // Calculate bearing to station (geographic: 0=North, clockwise)
+    const deltaLat = data.lat - lat;
+    const deltaLng = data.lng - lng;
+    // atan2(deltaLng, deltaLat) gives bearing from North, clockwise
+    // Convert to SVG angle where -PI/2 is up (North)
+    const bearing = Math.atan2(deltaLng, deltaLat);
+    const svgAngle = bearing - Math.PI / 2;
+
+    // Calculate spike length: closer = longer spike
+    const normalizedDist = Math.min(data.dist, MAX_DISTANCE) / MAX_DISTANCE;
+    const spikeLength = MIN_SPIKE_LENGTH + (RADAR_RADIUS - MIN_SPIKE_LENGTH) * (1 - Math.pow(normalizedDist, 0.5));
+
+    return {
+      ...data,
+      spikeLength,
+      bearing,      // Geographic bearing (radians, 0=North)
+      svgAngle      // SVG angle (radians, 0=East, -PI/2=North)
+    };
+  });
+
+  return result;
+}
+
+function showRadar(latlng, data) {
+  if (radarMarker) {
+    map.removeLayer(radarMarker);
+  }
+
+  const svg = createRadarSVG(data);
+  const iconSize = RADAR_RADIUS * 2 + 40;
+
+  const icon = L.divIcon({
+    className: 'radar-marker',
+    html: svg,
+    iconSize: [iconSize, iconSize],
+    iconAnchor: [iconSize / 2, iconSize / 2]
+  });
+
+  radarMarker = L.marker(latlng, { icon: icon, interactive: false }).addTo(map);
+}
+
+function createRadarSVG(data) {
+  const size = RADAR_RADIUS * 2 + 40; // Extra space for labels
+  const cx = size / 2;
+  const cy = size / 2;
+
+  let svg = `<svg width="${size}" height="${size}" style="filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));">`;
+
+  // Draw background circle
+  svg += `<circle cx="${cx}" cy="${cy}" r="${RADAR_RADIUS}" fill="rgba(255,255,255,0.9)" stroke="#ddd" stroke-width="1"/>`;
+
+  // Draw concentric reference circles
+  [0.33, 0.66].forEach(ratio => {
+    svg += `<circle cx="${cx}" cy="${cy}" r="${RADAR_RADIUS * ratio}" fill="none" stroke="#eee" stroke-width="1"/>`;
+  });
+
+  // Draw compass indicator (N marker)
+  svg += `<text x="${cx}" y="${cy - RADAR_RADIUS - 2}" text-anchor="middle" fill="#999" font-family="Arial" font-size="7">N</text>`;
+
+  // Sort by distance (farthest first) so closer lines render on top
+  const sortedByDist = [...data].sort((a, b) => b.dist - a.dist);
+
+  // Draw spikes using actual bearing angles
+  sortedByDist.forEach(item => {
+    const angle = item.svgAngle;
+    const x2 = cx + Math.cos(angle) * item.spikeLength;
+    const y2 = cy + Math.sin(angle) * item.spikeLength;
+
+    // Draw thick colored line with slight transparency for overlaps
+    svg += `<line x1="${cx}" y1="${cy}" x2="${x2}" y2="${y2}" stroke="${LINE_COLORS[item.line]}" stroke-width="5" stroke-linecap="round" opacity="0.85"/>`;
+
+    // Draw endpoint circle (larger, with border for visibility)
+    svg += `<circle cx="${x2}" cy="${y2}" r="5" fill="${LINE_COLORS[item.line]}" stroke="#fff" stroke-width="2"/>`;
+
+    // Draw line label at endpoint
+    const labelOffset = 10;
+    const lx = cx + Math.cos(angle) * (item.spikeLength + labelOffset);
+    const ly = cy + Math.sin(angle) * (item.spikeLength + labelOffset);
+    svg += `<text x="${lx}" y="${ly}" text-anchor="middle" dominant-baseline="middle" fill="${LINE_COLORS[item.line]}" font-family="Arial, sans-serif" font-weight="bold" font-size="8" stroke="#fff" stroke-width="2" paint-order="stroke">${item.line}</text>`;
+  });
+
+  // Draw center dot
+  svg += `<circle cx="${cx}" cy="${cy}" r="3" fill="#333"/>`;
+
+  svg += '</svg>';
+  return svg;
+}
+
+function formatDistance(meters) {
+  if (meters < 1000) {
+    return `${Math.round(meters)}m`;
+  }
+  return `${(meters / 1000).toFixed(1)}km`;
+}
+
+function updateInfo(data) {
+  const result = document.getElementById('result');
+
+  // Sort by distance for the info panel
+  const sorted = [...data].sort((a, b) => a.dist - b.dist);
+
+  result.innerHTML = sorted.map(item => `
+    <div class="line-item">
+      <div class="color-dot" style="background: ${LINE_COLORS[item.line]}"></div>
+      <span class="line-name">${item.line}</span>
+      <span class="station-name" title="${item.name}">${item.name}</span>
+      <span class="distance">${formatDistance(item.dist)}</span>
+    </div>
+  `).join('');
+}
+  </script>
+</body>
+</html>
