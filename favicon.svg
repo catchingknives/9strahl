@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- 9 rays from center, each in a U-Bahn color -->
+  <!-- U1 #7DAD4C, U2 #DA421E, U3 #007A5B, U4 #F0D722, U5 #7E5330, U6 #8C6DAB, U7 #528DBA, U8 #224F86, U9 #F3791D -->
+  <circle cx="16" cy="16" r="15" fill="#fff"/>
+  <line x1="16" y1="16" x2="16" y2="2" stroke="#7DAD4C" stroke-width="3" stroke-linecap="round"/>
+  <line x1="16" y1="16" x2="25.8" y2="4.2" stroke="#DA421E" stroke-width="3" stroke-linecap="round"/>
+  <line x1="16" y1="16" x2="30" y2="11" stroke="#007A5B" stroke-width="3" stroke-linecap="round"/>
+  <line x1="16" y1="16" x2="30" y2="21" stroke="#F0D722" stroke-width="3" stroke-linecap="round"/>
+  <line x1="16" y1="16" x2="25.8" y2="27.8" stroke="#7E5330" stroke-width="3" stroke-linecap="round"/>
+  <line x1="16" y1="16" x2="16" y2="30" stroke="#8C6DAB" stroke-width="3" stroke-linecap="round"/>
+  <line x1="16" y1="16" x2="6.2" y2="27.8" stroke="#528DBA" stroke-width="3" stroke-linecap="round"/>
+  <line x1="16" y1="16" x2="2" y2="21" stroke="#224F86" stroke-width="3" stroke-linecap="round"/>
+  <line x1="16" y1="16" x2="2" y2="11" stroke="#F3791D" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="16" cy="16" r="3" fill="#333"/>
+</svg>
